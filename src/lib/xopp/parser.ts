@@ -12,11 +12,25 @@ export function parseXopp(buffer: Uint8Array, filePath?: string): XoppDocument {
   const xournal = xmlDoc.getElementsByTagName('xournal')[0];
   if (!xournal) throw new Error("Invalid .xopp file (no xournal tag found)");
 
+  // Prioritize filename from filePath over internal XML title
+  let title = '';
+  if (filePath) {
+    const fullFileName = filePath.split(/[/\\]/).pop() || '';
+    const lastDotIndex = fullFileName.lastIndexOf('.');
+    title = lastDotIndex !== -1 ? fullFileName.substring(0, lastDotIndex) : fullFileName;
+  }
+
+  // Fallback to XML title or default if no filePath
+  if (!title) {
+    title = xmlDoc.getElementsByTagName('title')[0]?.textContent?.trim() || 'Unbenanntes Dokument';
+  }
+
   const doc: XoppDocument = {
     version: xournal.getAttribute('version') || '0.4.8',
     creator: xournal.getAttribute('creator') || 'XNoteTouch',
-    title: xmlDoc.getElementsByTagName('title')[0]?.textContent || 'Xournal document',
-    pages: []
+    title,
+    pages: [],
+    filePath
   };
 
   const pages = xmlDoc.getElementsByTagName('page');

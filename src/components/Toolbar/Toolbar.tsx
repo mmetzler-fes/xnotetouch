@@ -52,6 +52,7 @@ export const Toolbar: React.FC = () => {
           const { pdfDoc, numPages, width, height } = await loadPdf(fileData.buffer as ArrayBuffer);
           
           const newDoc = createEmptyDocument(selected.split(/[/\\]/).pop() || 'PDF Document');
+          newDoc.filePath = selected;
           newDoc.pages = []; // Clear default page
           
           for (let i = 1; i <= numPages; i++) {
@@ -87,6 +88,16 @@ export const Toolbar: React.FC = () => {
         }
         const data = serializeXopp(document);
         await writeFile(selected, data);
+        
+        // Update document metadata in store
+        const fullFileName = selected.split(/[/\\]/).pop() || '';
+        const lastDotIndex = fullFileName.lastIndexOf('.');
+        const newTitle = lastDotIndex !== -1 ? fullFileName.substring(0, lastDotIndex) : fullFileName;
+        
+        useDocumentStore.getState().updateDocumentMetadata(activeDocumentIndex, { 
+          filePath: selected,
+          title: newTitle
+        });
       }
     } catch (e) {
       console.error("Failed to save file", e);

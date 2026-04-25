@@ -32,6 +32,7 @@ interface DocumentState {
   toggleLayerVisibility: (layerId: string) => void;
   addLayerToActivePage: () => void;
   deleteLayerFromActivePage: (layerId: string) => void;
+  updateDocumentMetadata: (index: number, metadata: Partial<XoppDocument>) => void;
 }
 
 const MAX_HISTORY = 50;
@@ -115,6 +116,14 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       past: [...state.past, state.documents].slice(-MAX_HISTORY),
       future: []
     };
+  }),
+
+  updateDocumentMetadata: (index, metadata) => set((state) => {
+    const newDocs = [...state.documents];
+    if (newDocs[index]) {
+      newDocs[index] = { ...newDocs[index], ...metadata };
+    }
+    return { documents: newDocs };
   }),
 
   setActiveDocument: (index) => set((state) => {

@@ -1,7 +1,8 @@
 import jsPDF from 'jspdf';
 import { save } from '@tauri-apps/plugin-dialog';
-import { writeFile } from '@tauri-apps/plugin-fs';
+import { writeFile, readFile } from '@tauri-apps/plugin-fs';
 import { useDocumentStore } from '../../stores/documentStore';
+import { loadPdf, renderPdfPage } from './renderer';
 import Konva from 'konva';
 
 export const exportToPdf = async () => {
@@ -13,17 +14,19 @@ export const exportToPdf = async () => {
     return;
   }
 
+  // Cache for PDF documents to avoid redundant loading
+  const pdfCache = new Map<string, any>();
+
   try {
     const pdf = new jsPDF({
       orientation: 'portrait',
-      unit: 'pt', // Using points for consistency with XOPP
+      unit: 'pt',
       format: 'a4'
     });
 
     for (let i = 0; i < document.pages.length; i++) {
       const page = document.pages[i];
       
-      // Create off-screen stage for rendering
       const container = window.document.createElement('div');
       const stage = new Konva.Stage({
         container: container,
@@ -35,20 +38,42 @@ export const exportToPdf = async () => {
       stage.add(layer);
 
       // 1. White background
-      const bgRect = new Konva.Rect({
+      layer.add(new Konva.Rect({
         x: 0, y: 0, width: page.width, height: page.height, fill: 'white'
-      });
-      layer.add(bgRect);
+      }));
 
       // 2. Page background (PDF or Solid)
-      // Note: PDF background rendering is complex because it's async (PDF.js)
-      // For now, we only render solid backgrounds and strokes.
-      // TODO: Implement PDF background rendering in exporter if needed.
-      if (page.background?.type === 'solid') {
-        const solidBg = new Konva.Rect({
+      if (page.background?.type === 'pdf') {
+        try {
+          let pdfProxy = pdfCache.get(page.background.filename);
+          if (!pdfProxy) {
+            const pdfBytes = await readFile(page.background.filename);
+            const loaded = await loadPdf(pdfBytes.buffer as ArrayBuffer);
+            pdfProxy = loaded.pdfDoc;
+            pdfCache.set(page.background.filename, pdfProxy);
+          }
+
+          const tempCanvas = window.document.createElement('canvas');
+          const dataUrl = await renderPdfPage(pdfProxy, page.background.pageno, tempCanvas, page.width, page.height);
+          
+          const img = await new Promise<HTMLImageElement>((resolve) => {
+            const image = new window.Image();
+            image.src = dataUrl;
+            image.onload = () => resolve(image);
+          });
+
+          layer.add(new Konva.Image({
+            image: img,
+            width: page.width,
+            height: page.height
+          }));
+        } catch (e) {
+          console.error("Failed to render PDF background for export:", e);
+        }
+      } else if (page.background?.type === 'solid') {
+        layer.add(new Konva.Rect({
           x: 0, y: 0, width: page.width, height: page.height, fill: page.background.color
-        });
-        layer.add(solidBg);
+        }));
       }
 
       // 3. Drawing Layers

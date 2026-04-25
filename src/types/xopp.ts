@@ -74,4 +74,5 @@ export interface XoppDocument {
   creator: string;
   title: string;
   pages: Page[];
+  filePath?: string;
 }
