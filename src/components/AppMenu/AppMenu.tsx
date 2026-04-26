@@ -103,7 +103,7 @@ export const AppMenu: React.FC = () => {
       // Browser: Download
       try {
         const data = serializeXopp(document);
-        const blob = new Blob([data], { type: 'application/xml' });
+        const blob = new Blob([data as BlobPart], { type: 'application/xml' });
         const a = window.document.createElement('a');
         a.href = URL.createObjectURL(blob);
         a.download = (document.title || 'document') + '.xopp';
