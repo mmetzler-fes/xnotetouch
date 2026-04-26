@@ -8,8 +8,14 @@ interface PressureLineProps {
 }
 
 export const PressureLine: React.FC<PressureLineProps> = ({ stroke, isSelected }) => {
+  // Highlighter strokes use a whole-shape opacity so overlapping segments
+  // don't stack their transparency. Pen/eraser stay fully opaque.
+  const shapeOpacity = stroke.tool === 'highlighter' ? 0.15 : 1;
+
   return (
     <Shape
+      listening={false}
+      opacity={shapeOpacity}
       sceneFunc={(context, shape) => {
         if (stroke.points.length < 2) return;
 

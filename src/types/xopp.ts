@@ -1,4 +1,4 @@
-export type ToolType = 'pen' | 'highlighter' | 'eraser' | 'text';
+export type ToolType = 'pen' | 'highlighter' | 'eraser' | 'text' | 'shape' | 'selection' | 'image' | 'laser' | 'screenshot';
 
 export interface Point {
   x: number;
@@ -36,7 +36,52 @@ export interface TextElement {
   color: string;
 }
 
-export type LayerElement = Stroke | ImageElement | TextElement;
+export interface RectElement {
+  id: string;
+  type: 'rect';
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  color: string;
+  fillColor?: string;
+  strokeWidth: number;
+}
+
+export interface LineElement {
+  id: string;
+  type: 'line';
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  color: string;
+  strokeWidth: number;
+}
+
+export interface CircleElement {
+  id: string;
+  type: 'circle';
+  cx: number;
+  cy: number;
+  r: number;
+  color: string;
+  fillColor?: string;
+  strokeWidth: number;
+}
+
+export interface TriangleElement {
+  id: string;
+  type: 'triangle';
+  x1: number; y1: number;
+  x2: number; y2: number;
+  x3: number; y3: number;
+  color: string;
+  fillColor?: string;
+  strokeWidth: number;
+}
+
+export type LayerElement = Stroke | ImageElement | TextElement | RectElement | LineElement | CircleElement | TriangleElement;
 
 export interface Layer {
   id: string;

@@ -1,0 +1,37 @@
+.app-menu {
+  display: flex;
+  gap: 8px;
+  margin-left: 24px;
+  align-items: center;
+  border-left: 1px solid #444;
+  padding-left: 24px;
+}
+
+.menu-item {
+  background: #2a2a2a;
+  border: 1px solid #444;
+  color: #ccc;
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-weight: 500;
+}
+
+.menu-item:hover {
+  background: #3a3a3a;
+  border-color: #555;
+  color: #fff;
+}
+
+.menu-item svg {
+  color: #888;
+}
+
+.menu-item:hover svg {
+  color: #4CAF50;
+}

@@ -27,6 +27,8 @@ interface DocumentState {
   addPage: () => void;
   nextPage: () => void;
   prevPage: () => void;
+  deletePage: (index: number) => void;
+  movePage: (fromIndex: number, direction: 'up' | 'down') => void;
   
   // Layer Actions
   toggleLayerVisibility: (layerId: string) => void;
@@ -389,6 +391,52 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       return { activePageIndex: prevPageIndex, activeLayerId: firstLayerId };
     }
     return state;
+  }),
+  
+  deletePage: (index) => set((state) => {
+    const newDocs = state.documents.map((doc, dIdx) => {
+      if (dIdx !== state.activeDocumentIndex) return doc;
+      if (doc.pages.length <= 1) return doc;
+      return {
+        ...doc,
+        pages: doc.pages.filter((_, i) => i !== index)
+      };
+    });
+    
+    let newPageIndex = state.activePageIndex;
+    if (index <= state.activePageIndex && state.activePageIndex > 0) {
+      newPageIndex--;
+    }
+    
+    const updatedDoc = newDocs[state.activeDocumentIndex];
+    const newLayerId = updatedDoc?.pages[newPageIndex]?.layers[updatedDoc.pages[newPageIndex].layers.length - 1].id || null;
+
+    return { 
+      documents: newDocs, 
+      activePageIndex: newPageIndex,
+      activeLayerId: newLayerId,
+      past: [...state.past, state.documents].slice(-MAX_HISTORY),
+      future: []
+    };
+  }),
+
+  movePage: (fromIndex, direction) => set((state) => {
+    const doc = state.documents[state.activeDocumentIndex];
+    if (!doc) return state;
+    const toIndex = direction === 'up' ? fromIndex - 1 : fromIndex + 1;
+    if (toIndex < 0 || toIndex >= doc.pages.length) return state;
+    const newPages = [...doc.pages];
+    [newPages[fromIndex], newPages[toIndex]] = [newPages[toIndex], newPages[fromIndex]];
+    const newDocs = state.documents.map((d, i) =>
+      i === state.activeDocumentIndex ? { ...d, pages: newPages } : d
+    );
+    const newActivePageIndex = state.activePageIndex === fromIndex ? toIndex : state.activePageIndex;
+    return {
+      documents: newDocs,
+      activePageIndex: newActivePageIndex,
+      past: [...state.past, state.documents].slice(-MAX_HISTORY),
+      future: [],
+    };
   }),
 
   toggleLayerVisibility: (layerId) => set((state) => {

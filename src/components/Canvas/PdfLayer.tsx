@@ -1,7 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Image as KonvaImage } from 'react-konva';
 import { loadPdf, renderPdfPage } from '../../lib/pdf/renderer';
-import { readFile } from '@tauri-apps/plugin-fs';
 
 interface PdfLayerProps {
   filename: string;
@@ -27,8 +26,14 @@ export const PdfLayer: React.FC<PdfLayerProps> = ({ filename, pageno, width, hei
           for (let i = 0; i < binaryString.length; i++) {
             pdfBytes[i] = binaryString.charCodeAt(i);
           }
-        } else if (filename) {
+        } else if (filename && (typeof (window as any).__TAURI_INTERNALS__ !== 'undefined' || typeof (window as any).__TAURI__ !== 'undefined')) {
+          // Nur in Tauri: Datei vom Dateisystem laden
+          const { readFile } = await import('@tauri-apps/plugin-fs');
           pdfBytes = await readFile(filename);
+        } else {
+          // Im Browser: Kann PDF nicht nachladen, zeige Warnung
+          console.warn('PDF kann im Browser nicht vom Dateisystem geladen werden:', filename);
+          return;
         }
 
         if (pdfBytes && isMounted) {

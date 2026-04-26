@@ -1,438 +1,407 @@
 import React, { useRef, useState, useEffect, useMemo } from 'react';
-import { Stage, Layer, Line, Rect, Group, Image as KonvaImage, Text as KonvaText } from 'react-konva';
+import { Stage, Layer } from 'react-konva';
 import { useToolStore } from '../../stores/toolStore';
 import { useDocumentStore } from '../../stores/documentStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useClipboardStore } from '../../stores/clipboardStore';
-import { Stroke, ImageElement, LayerElement, Page } from '../../types/xopp';
-import { PdfLayer } from './PdfLayer';
-import { GridLayer } from './GridLayer';
-import { PressureLine } from './PressureLine';
-import { isPointInPolygon, getPointsBoundingBox, Point, isPointNearPolyline } from '../../lib/math/geometry';
+import { PageView } from './PageView';
+import { SelectionContextMenu } from './SelectionContextMenu';
+import { useCanvasSetup } from './hooks/useCanvasSetup';
+import { useZoomPan } from './hooks/useZoomPan';
+import { useDrawingHandlers } from './hooks/useDrawingHandlers';
 
 const PAGE_SPACING = 40;
 
-export const PastedImage: React.FC<{ element: ImageElement }> = ({ element }) => {
-  const [imgObj, setImgObj] = useState<HTMLImageElement | null>(null);
-  useEffect(() => {
-    const img = new window.Image();
-    img.src = element.dataUrl;
-    img.onload = () => setImgObj(img);
-  }, [element.dataUrl]);
-  if (!imgObj) return null;
-  return <KonvaImage x={element.x} y={element.y} width={element.width} height={element.height} image={imgObj} />;
-};
-
 export const DocumentCanvas: React.FC = () => {
-  const { activeTool, color, strokeWidth } = useToolStore();
-  const { 
-    documents, 
-    activeDocumentIndex, 
-    activePageIndex, 
-    setActivePage, 
-    addStrokeToActivePage, 
-    addElementToActivePage,
-    deleteElements
-  } = useDocumentStore();
-  const { scale, position, setScale, setPosition } = useUiStore();
+  const { activeTool, color } = useToolStore();
+  const { documents, activeDocumentIndex, activePageIndex, deleteElements, addElementToActivePage } = useDocumentStore();
+  const { scale, position, setPosition, pendingInsertImage, setPendingInsertImage } = useUiStore();
   const { elements: clipboardElements, setClipboard } = useClipboardStore();
-  
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [activeStroke, setActiveStroke] = useState<Stroke | null>(null);
-  const [lassoPoints, setLassoPoints] = useState<Point[]>([]);
-  const [selectedStrokeIds, setSelectedStrokeIds] = useState<Set<string>>(new Set());
-  const [editingText, setEditingText] = useState<{id?: string, x: number, y: number, text: string, pageIdx: number} | null>(null);
-  const [contextMenu, setContextMenu] = useState<{x: number, y: number, show: boolean, pageIdx: number}>({ x: 0, y: 0, show: false, pageIdx: 0 });
-  const stageRef = useRef<any>(null);
 
   const activeDoc = documents[activeDocumentIndex];
-  
-  // Calculate vertical positions of pages
+  const stageRef = useRef<any>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [stageSize, setStageSize] = useState({ width: 800, height: 600 });
+
+  // Track container size for Stage dimensions
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        setStageSize({
+          width: entry.contentRect.width,
+          height: entry.contentRect.height,
+        });
+      }
+    });
+    observer.observe(el);
+    setStageSize({ width: el.clientWidth, height: el.clientHeight });
+    return () => observer.disconnect();
+  }, []);
+
+  // Vertical page offsets
   const pageOffsets = useMemo(() => {
     if (!activeDoc) return [];
-    let currentY = 20; // Top margin
+    let y = 20;
     return activeDoc.pages.map(page => {
-      const y = currentY;
-      currentY += page.height + PAGE_SPACING;
-      return y;
+      const offset = y;
+      y += page.height + PAGE_SPACING;
+      return offset;
     });
   }, [activeDoc]);
 
-  // Initial Fit-to-Width / Fit-to-Page logic
+  // Horizontal scrollbar
+  const pageWidth = useMemo(() =>
+    activeDoc ? Math.max(...activeDoc.pages.map(p => p.width)) : 800,
+  [activeDoc]);
+  const HSCROLL_H = 12;
+  const HSCROLL_MARGIN = 20;
+  const contentW = pageWidth * scale;
+  const showHScroll = contentW + HSCROLL_MARGIN > stageSize.width + 10;
+  const posXMin = stageSize.width - contentW - HSCROLL_MARGIN;
+  const posXMax = HSCROLL_MARGIN;
+  const scrollRange = posXMax - posXMin;
+  const thumbW = showHScroll
+    ? Math.max(30, stageSize.width * stageSize.width / (contentW + HSCROLL_MARGIN * 2))
+    : stageSize.width;
+  const thumbT = scrollRange > 0
+    ? Math.max(0, Math.min(1, (posXMax - position.x) / scrollRange))
+    : 0;
+  const thumbLeft = thumbT * (stageSize.width - thumbW);
+
+  const [hScrollDrag, setHScrollDrag] = useState<{ mouseX: number; posX: number } | null>(null);
+  const hScrollRef = useRef({ posXMin, posXMax, scrollRange, stageWidth: stageSize.width, thumbW, posY: position.y });
+  hScrollRef.current = { posXMin, posXMax, scrollRange, stageWidth: stageSize.width, thumbW, posY: position.y };
+
   useEffect(() => {
-    if (activeDoc && activeDoc.pages.length > 0 && stageRef.current) {
-      const firstPage = activeDoc.pages[0];
-      const stageWidth = window.innerWidth - 470;
-      const stageHeight = window.innerHeight - 86;
-      
-      // Calculate scale to fit page width with some margin
-      const padding = 40;
-      const scaleX = (stageWidth - padding) / firstPage.width;
-      const scaleY = (stageHeight - padding) / firstPage.height;
-      const newScale = Math.min(scaleX, scaleY, 1.0); // Don't upscale past 1.0 by default
-      
-      setScale(newScale);
-      
-      // Center the page horizontally
-      const x = (stageWidth - firstPage.width * newScale) / 2;
-      setPosition({ x, y: 20 });
-    }
-  }, [activeDocumentIndex]); // Only run when document changes
+    if (!hScrollDrag) return;
+    const start = hScrollDrag;
+    const handleMove = (e: MouseEvent) => {
+      const { stageWidth, thumbW: tw, scrollRange: range, posXMin: min, posXMax: max, posY } = hScrollRef.current;
+      const deltaT = (e.clientX - start.mouseX) / (stageWidth - tw);
+      const newPosX = start.posX - deltaT * range;
+      setPosition({ x: Math.max(min, Math.min(max, newPosX)), y: posY });
+    };
+    const handleUp = () => setHScrollDrag(null);
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleUp);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hScrollDrag]);
 
-  if (!activeDoc) return <div className="no-document">Kein Dokument geöffnet</div>;
+  // Fit-to-width on document switch / resize
+  useCanvasSetup(activeDoc, activeDocumentIndex, containerRef);
 
-  const handleTextSubmit = () => {
-    if (editingText && editingText.text.trim()) {
-      if (activePageIndex !== editingText.pageIdx) setActivePage(editingText.pageIdx);
-      addElementToActivePage({
-        id: editingText.id || `text-${Date.now()}`,
-        type: 'text',
-        x: editingText.x,
-        y: editingText.y,
-        text: editingText.text,
-        font: 'Sans',
-        size: 12,
-        color: color
-      });
-    }
-    setEditingText(null);
-  };
+  // Zoom & pan
+  const { handleWheel, isSpacePressed } = useZoomPan();
 
-  const getPageInfoAt = (y: number) => {
+  // Drawing & editing
+  const {
+    isDrawing, isMoveMode, setIsMoveMode,
+    selectedStrokeIds, setSelectedStrokeIds,
+    selectionMenuPos, setSelectionMenuPos,
+    editingText, setEditingText,
+    contextMenu, setContextMenu,
+    lassoPoints,
+    screenshotRect,
+    laserStrokes, tools,
+    drawTick,
+    handleMouseDown, handleMouseMove, handleMouseUp, handleTextSubmit,
+    moveSelection,
+    drawingPageChangeRef,
+  } = useDrawingHandlers(stageRef, pageOffsets);
+
+  // Right-click on canvas: show selection/paste menu
+  const handleContextMenu = (e: any) => {
+    e.evt.preventDefault();
+    const stage = e.target.getStage();
+    const pos = stage.getPointerPosition();
+    if (!pos) return;
+    const rawY = (pos.y - stage.y()) / stage.scaleY();
+    let pageIdx = activePageIndex;
     for (let i = 0; i < pageOffsets.length; i++) {
-      const startY = pageOffsets[i];
-      const endY = startY + activeDoc.pages[i].height;
-      if (y >= startY && y <= endY) {
-        return { index: i, pageY: y - startY };
+      if (rawY >= pageOffsets[i] && rawY <= pageOffsets[i] + (activeDoc?.pages[i]?.height ?? 0)) {
+        pageIdx = i;
+        break;
       }
     }
-    return null;
+    setSelectionMenuPos({ screenX: pos.x, screenY: pos.y, pageIdx });
   };
 
-  const handleMouseDown = (e: any) => {
-    const stage = e.target.getStage();
-    const pos = stage.getPointerPosition();
-    const x = (pos.x - stage.x()) / stage.scaleX();
-    const rawY = (pos.y - stage.y()) / stage.scaleY();
-    
-    const pageInfo = getPageInfoAt(rawY);
-    if (!pageInfo) return;
-    
-    const { index: pageIdx, pageY: y } = pageInfo;
-    if (activePageIndex !== pageIdx) setActivePage(pageIdx);
-    
-    if (activeTool === 'text') {
-      setEditingText({ x, y, text: '', pageIdx });
-      return;
-    }
-    
-    if (e.evt.button === 1) return; // Middle click for panning handled by stage draggable
-    if (e.evt.button !== 0 && !e.evt.touches) return;
-    
-    setIsDrawing(true);
-    setContextMenu({ ...contextMenu, show: false });
-    
-    if (activeTool === 'lasso') {
-      setLassoPoints([{ x, y }]);
-      setSelectedStrokeIds(new Set());
-      return;
-    }
-    
-    if (activeTool === 'eraser') {
-      const page = activeDoc.pages[pageIdx];
-      const activeLayer = page.layers[page.layers.length - 1]; // Target top layer or active layer
-      const toDelete: string[] = [];
-      activeLayer.elements.forEach(el => {
-        if ('points' in el && isPointNearPolyline({ x, y }, el.points, 10)) toDelete.push(el.id);
-      });
-      if (toDelete.length > 0) deleteElements(toDelete);
-      return;
-    }
-    
-    const pressure = e.evt.pressure || 0.5;
-    const newStroke: Stroke = {
-      id: Date.now().toString(),
-      tool: activeTool as any,
-      color: color,
-      width: strokeWidth,
-      capStyle: 'round',
-      points: [{ x, y, pressure }]
-    };
-    setActiveStroke(newStroke);
-  };
+  // Stable refs so the auto-scroll effect doesn't re-fire when pageOffsets/scale
+  // change due to a stroke being added (activeDoc → new pageOffsets reference).
+  const pageOffsetsRef = useRef(pageOffsets);
+  pageOffsetsRef.current = pageOffsets;
+  const scaleRef = useRef(scale);
+  scaleRef.current = scale;
+  const positionRef = useRef(position);
+  positionRef.current = position;
 
-  const handleMouseMove = (e: any) => {
-    if (!isDrawing) return;
-    const stage = e.target.getStage();
-    const pos = stage.getPointerPosition();
-    const x = (pos.x - stage.x()) / stage.scaleX();
-    const rawY = (pos.y - stage.y()) / stage.scaleY();
-    
-    // For drawing, we want to stay within the page where we started
-    const startY = pageOffsets[activePageIndex];
-    const y = rawY - startY;
-    
-    if (activeTool === 'lasso') {
-      setLassoPoints([...lassoPoints, { x, y }]);
-      return;
-    }
-    
-    if (activeTool === 'eraser') {
-      const page = activeDoc.pages[activePageIndex];
-      const activeLayer = page.layers[page.layers.length - 1];
-      const toDelete: string[] = [];
-      activeLayer.elements.forEach(el => {
-        if ('points' in el && isPointNearPolyline({ x, y }, el.points, 10)) toDelete.push(el.id);
-      });
-      if (toDelete.length > 0) deleteElements(toDelete);
-      return;
-    }
-    
-    if (activeStroke) {
-      const pressure = e.evt.pressure || 0.5;
-      setActiveStroke({
-        ...activeStroke,
-        points: [...activeStroke.points, { x, y, pressure }]
-      });
-    }
-  };
-
-  const handleMouseUp = (e: any) => {
-    setIsDrawing(false);
-    
-    if (activeStroke) {
-      addStrokeToActivePage(activeStroke);
-      setActiveStroke(null);
-    }
-    
-    if (activeTool === 'lasso' && lassoPoints.length > 2) {
-      const page = activeDoc.pages[activePageIndex];
-      const activeLayer = page.layers[page.layers.length - 1];
-      const selectedIds = new Set<string>();
-      activeLayer.elements.forEach(el => {
-        if ('points' in el) {
-          const isInside = el.points.some(p => isPointInPolygon(p, lassoPoints));
-          if (isInside) selectedIds.add(el.id);
-        }
-      });
-      setSelectedStrokeIds(selectedIds);
-      if (selectedIds.size > 0) {
-        const stage = stageRef.current;
-        const pos = stage.getPointerPosition();
-        if (pos) setContextMenu({ x: pos.x, y: pos.y, show: true, pageIdx: activePageIndex });
-      }
-      setLassoPoints([]);
-    }
-  };
-
-  const [isSpacePressed, setIsSpacePressed] = useState(false);
+  // Auto-scroll to active page ONLY when activePageIndex changes (tab click).
+  // pageOffsets/scale/position are read via refs to avoid re-triggering on
+  // every stroke (each stroke creates a new activeDoc → new pageOffsets array).
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && !e.repeat) setIsSpacePressed(true);
-      if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
-        if (clipboardElements.length > 0) {
-          const stage = stageRef.current;
-          const pointerPos = stage?.getPointerPosition();
-          
-          let offsetX = 20;
-          let offsetY = 20;
-
-          if (pointerPos) {
-            const stageX = (pointerPos.x - stage.x()) / stage.scaleX();
-            const stageY = (pointerPos.y - stage.y()) / stage.scaleY();
-            
-            const pageInfo = getPageInfoAt(stageY);
-            if (pageInfo) {
-              const { index: pageIdx, pageY: y } = pageInfo;
-              if (activePageIndex !== pageIdx) setActivePage(pageIdx);
-              
-              // Center logic
-              let allPoints: Point[] = [];
-              clipboardElements.forEach(el => {
-                if ('points' in el) allPoints = allPoints.concat(el.points);
-                else if ('width' in el && 'height' in el) allPoints.push({ x: (el as any).x, y: (el as any).y }, { x: (el as any).x + (el as any).width, y: (el as any).y + (el as any).height });
-                else allPoints.push({ x: (el as any).x, y: (el as any).y });
-              });
-              const box = getPointsBoundingBox(allPoints);
-              const centerX = (box.minX + box.maxX) / 2;
-              const centerY = (box.minY + box.maxY) / 2;
-              
-              offsetX = stageX - centerX;
-              offsetY = y - centerY;
-            }
-          }
-
-          clipboardElements.forEach((el, idx) => {
-            const newEl = JSON.parse(JSON.stringify(el));
-            newEl.id = `${el.id}-paste-${Date.now()}-${idx}`;
-            if ('points' in newEl) {
-              newEl.points = newEl.points.map((p: Point) => ({ ...p, x: p.x + offsetX, y: p.y + offsetY }));
-            } else { 
-              newEl.x += offsetX; 
-              newEl.y += offsetY; 
-            }
-            addElementToActivePage(newEl);
-          });
-        }
-      }
-    };
-    const handleKeyUp = (e: KeyboardEvent) => { if (e.code === 'Space') setIsSpacePressed(false); };
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-    return () => { window.removeEventListener('keydown', handleKeyDown); window.removeEventListener('keyup', handleKeyUp); };
-  }, [clipboardElements, activePageIndex, addElementToActivePage]);
-
-  const handleWheel = (e: any) => {
-    if (e.evt.ctrlKey) {
-      const stage = stageRef.current;
-      if (!stage) return;
-      const oldScale = scale;
-      const pointer = stage.getPointerPosition();
-      if (!pointer) return;
-      const mousePointTo = { x: (pointer.x - stage.x()) / oldScale, y: (pointer.y - stage.y()) / oldScale };
-      const scaleBy = 1.1;
-      const newScale = e.evt.deltaY < 0 ? oldScale * scaleBy : oldScale / scaleBy;
-      if (newScale < 0.1 || newScale > 10) return;
-      setScale(newScale);
-      setPosition({ x: pointer.x - mousePointTo.x * newScale, y: pointer.y - mousePointTo.y * newScale });
-    } else {
-      // Smooth scrolling
-      setPosition({ x: position.x, y: position.y - e.evt.deltaY });
+    if (drawingPageChangeRef.current) {
+      drawingPageChangeRef.current = false;
+      return;
     }
-  };
+    const offsets = pageOffsetsRef.current;
+    if (offsets[activePageIndex] !== undefined) {
+      setPosition({ x: positionRef.current.x, y: -offsets[activePageIndex] * scaleRef.current + 20 });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePageIndex]);
 
-  const isPanning = isSpacePressed;
+  // Insert pending image (triggered by toolbar image button) into the center of the view
+  useEffect(() => {
+    if (!pendingInsertImage || !stageRef.current) return;
+    const { dataUrl, width: imgW, height: imgH } = pendingInsertImage;
+    setPendingInsertImage(null);
+
+    const stage = stageRef.current;
+    const sc = stage.scaleX();
+    const ox = stage.x();
+    const oy = stage.y();
+    // Center of the visible stage area in canvas coords
+    const centerX = (stageSize.width / 2 - ox) / sc;
+    const centerY = (stageSize.height / 2 - oy) / sc;
+
+    // Clamp image to fit within the visible stage area (full width/height, not half)
+    const maxW = stageSize.width / sc;
+    const maxH = stageSize.height / sc;
+    const ratio = Math.min(maxW / imgW, maxH / imgH, 1);
+    const w = imgW * ratio;
+    const h = imgH * ratio;
+
+    // Find which page the center falls on
+    const offsets = pageOffsetsRef.current;
+    const doc = activeDoc;
+    let pageIdx = activePageIndex;
+    let pageY = centerY - (offsets[pageIdx] ?? 0);
+    for (let i = 0; i < offsets.length; i++) {
+      const startY = offsets[i];
+      const endY = startY + (doc?.pages[i]?.height ?? 0);
+      if (centerY >= startY && centerY <= endY) {
+        pageIdx = i;
+        pageY = centerY - startY;
+        break;
+      }
+    }
+
+    const newEl = {
+      id: `img-${Date.now()}`,
+      type: 'image' as const,
+      x: centerX - w / 2,
+      y: pageY - h / 2,
+      width: w,
+      height: h,
+      dataUrl,
+    };
+    addElementToActivePage(newEl);
+    // Select and immediately enter move/handle mode
+    setSelectedStrokeIds(new Set([newEl.id]));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingInsertImage]);
+
+  // Cursor style
   const getCursorClass = () => {
-    if (isPanning) return 'cursor-grab';
+    if (isMoveMode) return 'cursor-move';
+    if (isSpacePressed) return 'cursor-grab';
     switch (activeTool) {
-      case 'eraser': return 'cursor-eraser';
-      case 'lasso': return 'cursor-lasso';
+      case 'eraser':      return 'cursor-eraser';
+      case 'selection':   return 'cursor-lasso';
       case 'highlighter': return 'cursor-text';
-      case 'pen': return 'cursor-pen';
-      default: return 'cursor-default';
+      case 'pen':         return 'cursor-pen';
+      case 'laser':
+      case 'screenshot':
+      case 'shape':       return 'cursor-crosshair';
+      default:            return 'cursor-default';
     }
   };
 
-  useEffect(() => {
-    const handlePaste = async (e: ClipboardEvent) => {
-      const items = e.clipboardData?.items;
-      if (!items) return;
-      for (const item of items) {
-        if (item.type.indexOf('image') !== -1) {
-          const blob = item.getAsFile();
-          if (blob) {
-            const reader = new FileReader();
-            reader.onload = (event) => {
-              const dataUrl = event.target?.result as string;
-              if (dataUrl) {
-                const img = new Image();
-                img.onload = () => {
-                  const stage = stageRef.current;
-                  const pos = stage.getPointerPosition() || { x: stage.width() / 2, y: stage.height() / 2 };
-                  const x = (pos.x - stage.x()) / stage.scaleX();
-                  const rawY = (pos.y - stage.y()) / stage.scaleY();
-                  const pageInfo = getPageInfoAt(rawY);
-                  if (pageInfo) {
-                    const newElement: ImageElement = { id: `img-${Date.now()}`, type: 'image', x, y: pageInfo.pageY, width: img.width, height: img.height, dataUrl };
-                    if (activePageIndex !== pageInfo.index) setActivePage(pageInfo.index);
-                    addElementToActivePage(newElement);
-                  }
-                };
-                img.src = dataUrl;
-              }
-            };
-            reader.readAsDataURL(blob);
-          }
-        }
-      }
-    };
-    window.addEventListener('paste', handlePaste);
-    return () => window.removeEventListener('paste', handlePaste);
-  }, [activePageIndex, addElementToActivePage]);
+  if (!activeDoc) {
+    return <div className="no-document">Kein Dokument geöffnet</div>;
+  }
+
+  const effectiveStageH = stageSize.height - (showHScroll ? HSCROLL_H : 0);
 
   return (
-    <div className="document-canvas-container" style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden' }}>
+    <div
+      ref={containerRef}
+      className="document-canvas-container"
+      style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden' }}
+    >
       <Stage
-        width={window.innerWidth - 470} height={window.innerHeight - 86}
-        scaleX={scale} scaleY={scale} x={position.x} y={position.y}
-        draggable={isPanning} onDragEnd={(e) => setPosition({ x: e.target.x(), y: e.target.y() })}
-        onWheel={handleWheel} onMouseDown={isPanning ? undefined : handleMouseDown}
-        onMousemove={isPanning ? undefined : handleMouseMove} onMouseup={isPanning ? undefined : handleMouseUp}
-        onTouchStart={isPanning ? undefined : handleMouseDown} onTouchMove={isPanning ? undefined : handleMouseMove}
-        onTouchEnd={isPanning ? undefined : handleMouseUp} ref={stageRef} className={getCursorClass()}
+        width={stageSize.width}
+        height={effectiveStageH}
+        scaleX={scale} scaleY={scale}
+        x={position.x} y={position.y}
+        draggable={isSpacePressed}
+        onDragEnd={(e) => {
+          // Guard: only update position when the Stage itself was dragged,
+          // not when a child node's dragend event bubbles up.
+          if (e.target === stageRef.current) {
+            setPosition({ x: e.target.x(), y: e.target.y() });
+          }
+        }}
+        onWheel={handleWheel}
+        onContextMenu={handleContextMenu}
+        onMouseDown={isSpacePressed ? undefined : handleMouseDown}
+        onMousemove={isSpacePressed ? undefined : handleMouseMove}
+        onMouseup={isSpacePressed ? undefined : handleMouseUp}
+        onTouchStart={isSpacePressed ? undefined : handleMouseDown}
+        onTouchMove={isSpacePressed ? undefined : handleMouseMove}
+        onTouchEnd={isSpacePressed ? undefined : handleMouseUp}
+        ref={stageRef}
+        className={getCursorClass()}
       >
         <Layer>
           {activeDoc.pages.map((page, pIdx) => (
-            <Group key={page.id || pIdx} y={pageOffsets[pIdx]}>
-              {/* Page Background & Shadow */}
-              <Rect x={0} y={0} width={page.width} height={page.height} fill="#ffffff" shadowColor="black" shadowBlur={10} shadowOpacity={0.3} shadowOffset={{ x: 2, y: 2 }} />
-              
-              {/* Specialized Backgrounds */}
-              {page.background?.type === 'solid' && (
-                <Group>
-                  <Rect width={page.width} height={page.height} fill={page.background.color} />
-                  <GridLayer width={page.width} height={page.height} style={page.background.style} />
-                </Group>
-              )}
-              {page.background?.type === 'pdf' && (
-                <PdfLayer filename={page.background.filename} pageno={page.background.pageno} width={page.width} height={page.height} />
-              )}
-              
-              {/* Drawing Layers */}
-              {page.layers.map((layer, lIndex) => {
-                if (layer.visible === false) return null;
-                return (
-                  <Group key={layer.id || `layer-${lIndex}`}>
-                    {layer.elements.map((el) => {
-                      if ('points' in el) {
-                        return <PressureLine key={el.id} stroke={el} isSelected={selectedStrokeIds.has(el.id)} />;
-                      } else if (el.type === 'image') {
-                        return <PastedImage key={el.id} element={el} />;
-                      } else if (el.type === 'text') {
-                        return <KonvaText key={el.id} x={el.x} y={el.y} text={el.text} fontSize={el.size} fill={el.color} fontFamily={el.font} />;
-                      }
-                      return null;
-                    })}
-                  </Group>
-                );
-              })}
-              
-              {/* Active Stroke (if drawing on this page) */}
-              {isDrawing && activePageIndex === pIdx && activeStroke && <PressureLine stroke={activeStroke} isSelected={false} />}
-              
-              {/* Lasso (if active on this page) */}
-              {lassoPoints.length > 0 && activePageIndex === pIdx && <Line points={lassoPoints.flatMap(p => [p.x, p.y])} stroke="#4CAF50" strokeWidth={1.5} dash={[5, 5]} closed={true} />}
-            </Group>
+            <PageView
+              key={page.id || pIdx}
+              page={page}
+              pageIndex={pIdx}
+              offsetY={pageOffsets[pIdx]}
+              activePageIndex={activePageIndex}
+              isDrawing={isDrawing}
+              activeTool={activeTool}
+              toolInstances={tools as any}
+              lassoPoints={lassoPoints}
+              screenshotRect={screenshotRect}
+              laserStrokes={laserStrokes}
+              selectedStrokeIds={selectedStrokeIds}
+              drawTick={drawTick}
+            />
           ))}
         </Layer>
       </Stage>
 
-      {/* Text Editor Overlay */}
+      {/* Horizontal scrollbar */}
+      {showHScroll && (
+        <div
+          style={{
+            position: 'absolute', bottom: 0, left: 0,
+            width: stageSize.width, height: HSCROLL_H,
+            background: 'rgba(0,0,0,0.18)', zIndex: 3000,
+            userSelect: 'none', cursor: 'default',
+          }}
+          onMouseDown={(e) => {
+            // Click on track → jump thumb to clicked position
+            const trackX = e.nativeEvent.offsetX;
+            const newThumbLeft = Math.max(0, Math.min(stageSize.width - thumbW, trackX - thumbW / 2));
+            const newT = newThumbLeft / (stageSize.width - thumbW);
+            const newPosX = posXMax - newT * scrollRange;
+            setPosition({ x: Math.max(posXMin, Math.min(posXMax, newPosX)), y: position.y });
+          }}
+        >
+          <div
+            style={{
+              position: 'absolute', top: 2, height: HSCROLL_H - 4,
+              borderRadius: HSCROLL_H / 2, width: thumbW, left: thumbLeft,
+              background: 'rgba(200,200,200,0.55)', cursor: 'ew-resize',
+            }}
+            onMouseDown={(e) => {
+              e.stopPropagation();
+              setHScrollDrag({ mouseX: e.clientX, posX: position.x });
+            }}
+          />
+        </div>
+      )}
+
+      {/* Move mode hint banner */}
+      {isMoveMode && (
+        <div style={{
+          position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)',
+          background: 'rgba(76,175,80,0.9)', color: '#fff',
+          padding: '4px 14px', borderRadius: 6, fontSize: 13,
+          pointerEvents: 'none', zIndex: 2500,
+        }}>
+          Verschieben — Klicken und Ziehen, loslassen zum Ablegen
+        </div>
+      )}
+
+      {/* Selection context menu */}
+      {selectionMenuPos && (
+        <SelectionContextMenu
+          screenX={selectionMenuPos.screenX}
+          screenY={selectionMenuPos.screenY}
+          pageIdx={selectionMenuPos.pageIdx}
+          selectedIds={selectedStrokeIds}
+          stageRef={stageRef}
+          scale={scale}
+          position={position}
+          pageOffsets={pageOffsets}
+          moveSelection={moveSelection}
+          onStartMove={() => {
+            setSelectionMenuPos(null);   // hide menu but keep selection
+            setTimeout(() => setIsMoveMode(true), 50);
+          }}
+          onClose={() => { setSelectionMenuPos(null); setSelectedStrokeIds(new Set()); }}
+        />
+      )}
+
+      {/* Text editing overlay */}
       {editingText && (
         <textarea
-          autoFocus value={editingText.text} onChange={(e) => setEditingText({ ...editingText, text: e.target.value })}
-          onBlur={handleTextSubmit} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) handleTextSubmit(); }}
+          autoFocus
+          value={editingText.text}
+          onChange={(e) => setEditingText({ ...editingText, text: e.target.value })}
+          onBlur={handleTextSubmit}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) handleTextSubmit(); }}
           style={{
-            position: 'absolute', top: (pageOffsets[editingText.pageIdx] + editingText.y) * scale + position.y, left: editingText.x * scale + position.x,
-            fontSize: (12 * scale) + 'px', color: color, background: 'rgba(255,255,255,0.8)', border: '1px dashed #4CAF50',
-            outline: 'none', padding: '2px', zIndex: 2000, minWidth: '100px', fontFamily: 'Sans-serif', resize: 'both'
+            position: 'absolute',
+            top: (pageOffsets[editingText.pageIdx] + editingText.y) * scale + position.y,
+            left: editingText.x * scale + position.x,
+            fontSize: (12 * scale) + 'px',
+            color,
+            background: 'rgba(255,255,255,0.8)',
+            border: '1px dashed #4CAF50',
+            outline: 'none',
+            padding: '2px',
+            zIndex: 2000,
+            minWidth: '100px',
+            fontFamily: 'Sans-serif',
+            resize: 'both',
           }}
         />
       )}
 
-      {/* Context Menu Overlay */}
+      {/* Context menu overlay */}
       {contextMenu.show && (
         <div style={{
-          position: 'absolute', top: contextMenu.y, left: contextMenu.x, background: '#2d2d2d', border: '1px solid #444',
-          borderRadius: '6px', boxShadow: '0 4px 12px rgba(0,0,0,0.5)', padding: '4px', display: 'flex', flexDirection: 'column', zIndex: 1000
+          position: 'absolute',
+          top: contextMenu.y, left: contextMenu.x,
+          background: '#2d2d2d', border: '1px solid #444',
+          borderRadius: '6px', boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+          padding: '4px', display: 'flex', flexDirection: 'column', zIndex: 1000,
         }}>
-          <button className="menu-btn danger" onClick={() => { deleteElements(Array.from(selectedStrokeIds)); setContextMenu({ ...contextMenu, show: false }); setSelectedStrokeIds(new Set()); }}>Löschen</button>
-          <button className="menu-btn" onClick={() => { 
-            const page = activeDoc.pages[contextMenu.pageIdx];
-            const activeLayer = page.layers[page.layers.length - 1]; 
-            const selectedElements = activeLayer.elements.filter(el => selectedStrokeIds.has(el.id)); 
-            setClipboard(selectedElements); setContextMenu({ ...contextMenu, show: false }); setSelectedStrokeIds(new Set()); 
-          }}>Als Vektor kopieren</button>
+          <button
+            className="menu-btn danger"
+            onClick={() => {
+              deleteElements(Array.from(selectedStrokeIds));
+              setContextMenu({ ...contextMenu, show: false });
+              setSelectedStrokeIds(new Set());
+            }}
+          >
+            Löschen
+          </button>
+          <button
+            className="menu-btn"
+            onClick={() => {
+              const page = activeDoc.pages[contextMenu.pageIdx];
+              const activeLayer = page.layers[page.layers.length - 1];
+              const selected = activeLayer.elements.filter(el => selectedStrokeIds.has(el.id));
+              setClipboard(selected);
+              setContextMenu({ ...contextMenu, show: false });
+              setSelectedStrokeIds(new Set());
+            }}
+          >
+            Als Vektor kopieren
+          </button>
         </div>
       )}
     </div>

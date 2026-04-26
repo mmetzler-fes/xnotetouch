@@ -5,6 +5,7 @@ import { DocumentCanvas } from './components/Canvas/DocumentCanvas';
 import { DocumentTabs } from './components/DocumentTabs/DocumentTabs';
 import { LayerPanel } from './components/LayerPanel/LayerPanel';
 import { useDocumentStore } from './stores/documentStore';
+import { useUiStore } from './stores/uiStore';
 
 import { readFile, watch } from '@tauri-apps/plugin-fs';
 import { ask } from '@tauri-apps/plugin-dialog';
@@ -12,18 +13,27 @@ import { parseXopp } from './lib/xopp/parser';
 import { isInternalSaving, saveDocument } from './lib/fs/persistence';
 
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { AppMenu } from './components/AppMenu/AppMenu';
 
 function App() {
   const { documents, activeDocumentIndex, undo, redo, addDocument } = useDocumentStore();
   const document = documents[activeDocumentIndex];
 
-  // Update native window title
+  // Update native window title (nur in Tauri)
   React.useEffect(() => {
-    getCurrentWindow().setTitle('XNoteTouch');
+    // Nur ausführen, wenn Tauri-API verfügbar ist
+    const isTauri = typeof (window as any).__TAURI_INTERNALS__ !== 'undefined' || typeof (window as any).__TAURI__ !== 'undefined';
+    if (isTauri && typeof getCurrentWindow === 'function') {
+      getCurrentWindow().setTitle('XNoteTouch');
+    }
   }, []);
 
-  // Auto-Save Effect for ALL documents
+  // Auto-Save Effect for ALL documents (nur in Tauri)
   React.useEffect(() => {
+    // Nur in Tauri aktivieren
+    const isTauri = typeof (window as any).__TAURI_INTERNALS__ !== 'undefined' || typeof (window as any).__TAURI__ !== 'undefined';
+    if (!isTauri) return;
+    
     const timer = setInterval(() => {
       documents.forEach(doc => {
         if (doc.filePath && doc.filePath.endsWith('.xopp')) {
@@ -35,8 +45,12 @@ function App() {
     return () => clearInterval(timer);
   }, [documents]);
 
-  // File Watcher Effect
+  // File Watcher Effect (nur in Tauri)
   React.useEffect(() => {
+    // Nur in Tauri aktivieren
+    const isTauri = typeof (window as any).__TAURI_INTERNALS__ !== 'undefined' || typeof (window as any).__TAURI__ !== 'undefined';
+    if (!isTauri) return;
+    
     let unwatch: (() => void) | null = null;
 
     const startWatching = async () => {
@@ -89,16 +103,21 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [undo, redo]);
 
+  const { isSidebarVisible } = useUiStore();
+
   return (
     <div className="app-container">
       <header className="titlebar">
         <h1>XNoteTouch</h1>
+        <AppMenu />
       </header>
       <DocumentTabs />
       <main className="main-content">
-        <aside className="sidebar">
-          <Sidebar />
-        </aside>
+        {isSidebarVisible && (
+          <aside className="sidebar">
+            <Sidebar />
+          </aside>
+        )}
         <section className="canvas-area">
           <div className="toolbar">
             <Toolbar />

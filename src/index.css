@@ -28,7 +28,7 @@ body {
 }
 
 .titlebar {
-  height: 32px;
+  height: 40px;
   background-color: var(--bg-dark);
   display: flex;
   align-items: center;
@@ -38,9 +38,14 @@ body {
 }
 
 .titlebar h1 {
-  font-size: 14px;
-  font-weight: 600;
+  font-size: 16px;
+  font-weight: 700;
   color: #fff;
+  letter-spacing: -0.5px;
+}
+
+.cursor-crosshair {
+  cursor: crosshair;
 }
 
 .active-doc-title {
@@ -110,6 +115,10 @@ body {
 
 .cursor-grab {
   cursor: grab;
+}
+
+.cursor-move {
+  cursor: move;
 }
 
 .cursor-grabbing {

@@ -1,9 +1,29 @@
 import pako from 'pako';
-import { XoppDocument, Page, Layer, Stroke, ToolType } from '../../types/xopp';
+import { XoppDocument, Page, Layer, Stroke, ToolType, ImageElement, TextElement, RectElement, LineElement, CircleElement, TriangleElement } from '../../types/xopp';
 
-export function parseXopp(buffer: Uint8Array, filePath?: string): XoppDocument {
-  // 1. Decompress GZIP
-  const xmlString = pako.inflate(buffer, { to: 'string' });
+export function parseXopp(buffer: Uint8Array | ArrayBuffer | string, filePath?: string): XoppDocument {
+  let xmlString: string;
+  
+  // Handle different input types
+  if (typeof buffer === 'string') {
+    // Already a string, possibly plain XML or need decompression check
+    xmlString = buffer;
+    // Try to detect if it's compressed by checking if it starts with valid XML
+    if (!xmlString.trim().startsWith('<?xml') && !xmlString.trim().startsWith('<xournal')) {
+      try {
+        // Might be compressed, try to decompress
+        const uint8Array = new TextEncoder().encode(xmlString);
+        xmlString = pako.inflate(uint8Array, { to: 'string' });
+      } catch (e) {
+        // If decompression fails, assume it's already plain XML
+      }
+    }
+  } else {
+    // Convert to Uint8Array if needed
+    const uint8Array = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+    // 1. Decompress GZIP
+    xmlString = pako.inflate(uint8Array, { to: 'string' });
+  }
   
   // 2. Parse XML
   const parser = new DOMParser();
@@ -129,6 +149,104 @@ export function parseXopp(buffer: Uint8Array, filePath?: string): XoppDocument {
           capStyle: (strokeEl.getAttribute('capStyle') || 'round') as any,
           points
         } as any);
+      }
+
+      // --- image elements ---
+      const imageEls = layerEl.getElementsByTagName('image');
+      for (let iIdx = 0; iIdx < imageEls.length; iIdx++) {
+        const imgEl = imageEls[iIdx];
+        const dataUrl = imgEl.textContent?.trim() || '';
+        if (!dataUrl) continue;
+        layer.elements.push({
+          id: `image-${pIndex}-${childIdx}-${iIdx}`,
+          type: 'image',
+          x: parseFloat(imgEl.getAttribute('x') || '0'),
+          y: parseFloat(imgEl.getAttribute('y') || '0'),
+          width: parseFloat(imgEl.getAttribute('width') || '100'),
+          height: parseFloat(imgEl.getAttribute('height') || '100'),
+          dataUrl,
+        } as ImageElement);
+      }
+
+      // --- text elements ---
+      const textEls = layerEl.getElementsByTagName('text');
+      for (let tIdx = 0; tIdx < textEls.length; tIdx++) {
+        const textEl = textEls[tIdx];
+        layer.elements.push({
+          id: `text-${pIndex}-${childIdx}-${tIdx}`,
+          type: 'text',
+          x: parseFloat(textEl.getAttribute('x') || '0'),
+          y: parseFloat(textEl.getAttribute('y') || '0'),
+          text: textEl.textContent || '',
+          font: textEl.getAttribute('font') || 'Sans',
+          size: parseFloat(textEl.getAttribute('size') || '12'),
+          color: textEl.getAttribute('color') || '#000000ff',
+        } as TextElement);
+      }
+
+      // --- rect elements ---
+      const rectEls = layerEl.getElementsByTagName('rect');
+      for (let rIdx = 0; rIdx < rectEls.length; rIdx++) {
+        const rectEl = rectEls[rIdx];
+        layer.elements.push({
+          id: `rect-${pIndex}-${childIdx}-${rIdx}`,
+          type: 'rect',
+          x: parseFloat(rectEl.getAttribute('x') || '0'),
+          y: parseFloat(rectEl.getAttribute('y') || '0'),
+          width: parseFloat(rectEl.getAttribute('width') || '0'),
+          height: parseFloat(rectEl.getAttribute('height') || '0'),
+          color: rectEl.getAttribute('color') || '#000000ff',
+          fillColor: rectEl.getAttribute('fillColor') || 'transparent',
+          strokeWidth: parseFloat(rectEl.getAttribute('strokeWidth') || '2'),
+        } as RectElement);
+      }
+
+      // --- line elements ---
+      const lineEls = layerEl.getElementsByTagName('line');
+      for (let lIdx = 0; lIdx < lineEls.length; lIdx++) {
+        const lineEl = lineEls[lIdx];
+        layer.elements.push({
+          id: `line-${pIndex}-${childIdx}-${lIdx}`,
+          type: 'line',
+          x1: parseFloat(lineEl.getAttribute('x1') || '0'),
+          y1: parseFloat(lineEl.getAttribute('y1') || '0'),
+          x2: parseFloat(lineEl.getAttribute('x2') || '0'),
+          y2: parseFloat(lineEl.getAttribute('y2') || '0'),
+          color: lineEl.getAttribute('color') || '#000000ff',
+          strokeWidth: parseFloat(lineEl.getAttribute('strokeWidth') || '2'),
+        } as LineElement);
+      }
+
+      // --- circle elements ---
+      const circleEls = layerEl.getElementsByTagName('circle');
+      for (let cIdx = 0; cIdx < circleEls.length; cIdx++) {
+        const circleEl = circleEls[cIdx];
+        layer.elements.push({
+          id: `circle-${pIndex}-${childIdx}-${cIdx}`,
+          type: 'circle',
+          cx: parseFloat(circleEl.getAttribute('cx') || '0'),
+          cy: parseFloat(circleEl.getAttribute('cy') || '0'),
+          r: parseFloat(circleEl.getAttribute('r') || '0'),
+          color: circleEl.getAttribute('color') || '#000000ff',
+          fillColor: circleEl.getAttribute('fillColor') || 'transparent',
+          strokeWidth: parseFloat(circleEl.getAttribute('strokeWidth') || '2'),
+        } as CircleElement);
+      }
+
+      // --- triangle elements ---
+      const triEls = layerEl.getElementsByTagName('triangle');
+      for (let tIdx = 0; tIdx < triEls.length; tIdx++) {
+        const triEl = triEls[tIdx];
+        layer.elements.push({
+          id: `triangle-${pIndex}-${childIdx}-${tIdx}`,
+          type: 'triangle',
+          x1: parseFloat(triEl.getAttribute('x1') || '0'), y1: parseFloat(triEl.getAttribute('y1') || '0'),
+          x2: parseFloat(triEl.getAttribute('x2') || '0'), y2: parseFloat(triEl.getAttribute('y2') || '0'),
+          x3: parseFloat(triEl.getAttribute('x3') || '0'), y3: parseFloat(triEl.getAttribute('y3') || '0'),
+          color: triEl.getAttribute('color') || '#000000ff',
+          fillColor: triEl.getAttribute('fillColor') || 'transparent',
+          strokeWidth: parseFloat(triEl.getAttribute('strokeWidth') || '2'),
+        } as TriangleElement);
       }
       page.layers.push(layer);
     }

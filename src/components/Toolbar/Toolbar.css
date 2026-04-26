@@ -3,17 +3,18 @@
   align-items: center;
   width: 100%;
   height: 100%;
+  padding: 0 16px;
 }
 
 .tool-group {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .separator {
-  margin-left: 16px;
-  padding-left: 16px;
+  margin-left: 20px;
+  padding-left: 20px;
   border-left: 1px solid #444;
 }
 
@@ -23,26 +24,35 @@
 }
 
 .tool-btn {
-  background: transparent;
-  border: none;
+  background: #2a2a2a;
+  border: 1px solid #444;
   color: var(--text-main);
-  width: 36px;
-  height: 36px;
+  width: 38px;
+  height: 38px;
   border-radius: 6px;
   display: flex;
   justify-content: center;
   align-items: center;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: all 0.2s;
 }
 
 .tool-btn:hover {
-  background: #444;
+  background: #3a3a3a;
+  border-color: #555;
+  color: #fff;
 }
 
 .tool-btn.active {
-  background: #555;
+  background: #4CAF50;
+  border-color: #4CAF50;
   color: #fff;
+  box-shadow: 0 0 8px rgba(76, 175, 80, 0.3);
+}
+
+.tool-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .tool-btn.primary {
@@ -53,29 +63,120 @@
   background: rgba(76, 175, 80, 0.2);
 }
 
-.color-picker {
-  width: 30px;
-  height: 30px;
+.thickness-selector {
+  display: flex;
+  gap: 6px;
+  background: #2a2a2a;
+  padding: 4px;
+  border-radius: 6px;
+  border: 1px solid #444;
+}
+
+.thickness-btn {
+  background: transparent;
   border: none;
+  color: #aaa;
+  width: 32px;
+  height: 32px;
   border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.75rem;
+  transition: all 0.2s;
+}
+
+.thickness-btn:hover {
+  background: #3a3a3a;
+  color: #fff;
+}
+
+.thickness-btn.active {
+  background: #4CAF50;
+  color: #fff;
+}
+
+.color-selectors {
+  display: flex;
+  gap: 16px;
+}
+
+.color-picker-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.fill-color-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.color-picker--disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.transparent-btn {
+  width: 22px;
+  height: 22px;
+  font-size: 14px;
+  line-height: 1;
+  border: 1.5px solid #555;
+  border-radius: 4px;
+  background: transparent;
+  color: #888;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.transparent-btn:hover {
+  border-color: #4CAF50;
+  color: #4CAF50;
+}
+
+.transparent-btn--active {
+  border-color: #4CAF50;
+  color: #4CAF50;
+  background: rgba(76, 175, 80, 0.12);
+}
+
+.color-label {
+  font-size: 0.65rem;
+  color: #888;
+  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.color-picker {
+  width: 32px;
+  height: 32px;
+  border: 2px solid #444;
+  border-radius: 6px;
   cursor: pointer;
   padding: 0;
   background: transparent;
+  transition: border-color 0.2s;
 }
 
-.width-picker {
-  background: #333;
-  color: var(--text-main);
-  border: 1px solid #444;
-  padding: 6px 8px;
-  border-radius: 4px;
-  font-family: inherit;
+.color-picker:hover {
+  border-color: #4CAF50;
 }
 
 .page-indicator {
   font-size: 0.9rem;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--text-main);
-  min-width: 60px;
+  min-width: 70px;
   text-align: center;
+  background: #2a2a2a;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid #444;
 }

@@ -1,108 +1,63 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { useToolStore } from '../../stores/toolStore';
-import { useDocumentStore, createEmptyDocument } from '../../stores/documentStore';
-import { Page, Layer } from '../../types/xopp';
-import { Pen, Highlighter, Eraser, Undo, Redo, Download, FolderOpen, Save, Grid3X3, MousePointer2, FileText, Plus, ChevronLeft, ChevronRight, Type } from 'lucide-react';
-import { open, save } from '@tauri-apps/plugin-dialog';
-import { readDir, BaseDirectory, readFile, writeFile } from '@tauri-apps/plugin-fs';
-import { parseXopp } from '../../lib/xopp/parser';
-import { serializeXopp } from '../../lib/xopp/serializer';
-import { exportToPdf } from '../../lib/pdf/exporter';
-import { loadPdf } from '../../lib/pdf/renderer';
-import { invoke } from '@tauri-apps/api/core';
+import { useDocumentStore } from '../../stores/documentStore';
+import { useUiStore } from '../../stores/uiStore';
+import { 
+  Pen, 
+  Highlighter, 
+  Eraser, 
+  Undo, 
+  Redo, 
+  Grid3X3, 
+  MousePointer2, 
+  Plus, 
+  ChevronLeft, 
+  ChevronRight,
+  Shapes,
+  Zap,
+  Image as ImageIcon,
+  Camera
+} from 'lucide-react';
 import './Toolbar.css';
 
 export const Toolbar: React.FC = () => {
-  const { activeTool, color, strokeWidth, setTool, setColor, setStrokeWidth } = useToolStore();
+  const { activeTool, color, fillColor, highlighterColor, strokeWidth, highlighterStrokeWidth, setTool, setColor, setFillColor, setHighlighterColor, setStrokeWidth, setHighlighterStrokeWidth } = useToolStore();
+  const { setPendingInsertImage } = useUiStore();
+  const lastFillColorRef = useRef(fillColor === 'transparent' ? '#ff0000' : fillColor.substring(0, 7));
+  const isTransparent = fillColor === 'transparent';
+  const isHighlighter = activeTool === 'highlighter';
+  // Use the right stroke width for the active tool
+  const activeStrokeWidth = isHighlighter ? highlighterStrokeWidth : strokeWidth;
+  const setActiveStrokeWidth = isHighlighter ? setHighlighterStrokeWidth : setStrokeWidth;
+
+  const handleFillColorChange = (hex: string) => {
+    lastFillColorRef.current = hex;
+    setFillColor(hex);
+  };
+
+  const toggleTransparent = () => {
+    if (isTransparent) {
+      setFillColor(lastFillColorRef.current);
+    } else {
+      lastFillColorRef.current = fillColor.substring(0, 7);
+      setFillColor('transparent');
+    }
+  };
   const { 
     documents, 
     activeDocumentIndex, 
     activePageIndex, 
-    addDocument, 
-    setPageBackground, 
     addPage, 
     nextPage, 
     prevPage,
     undo,
     redo,
     past,
-    future
+    future,
+    setPageBackground
   } = useDocumentStore();
   
-  React.useEffect(() => {
-    console.log("Tauri internals check:", (window as any).__TAURI_INTERNALS__);
-    console.log("Invoke function check:", invoke);
-  }, []);
-
   const document = documents[activeDocumentIndex];
-
-  const handleOpen = async () => {
-    try {
-      const selected = await open({
-        multiple: false,
-        filters: [
-          { name: 'Xournal++', extensions: ['xopp'] },
-          { name: 'PDF', extensions: ['pdf'] }
-        ]
-      });
-      if (typeof selected === 'string') {
-        if (selected.endsWith('.pdf')) {
-          // Open PDF as new document
-          const fileData = await readFile(selected);
-          const { pdfDoc, numPages, width, height } = await loadPdf(fileData.buffer as ArrayBuffer);
-          
-          const newDoc = createEmptyDocument(selected.split(/[/\\]/).pop() || 'PDF Document');
-          newDoc.filePath = selected;
-          newDoc.pages = []; // Clear default page
-          
-          for (let i = 1; i <= numPages; i++) {
-            newDoc.pages.push({
-              id: `pdf-page-${Date.now()}-${i}`,
-              width: width,
-              height: height,
-              background: { type: 'pdf', domain: 'absolute', filename: selected, pageno: i },
-              layers: [{ id: `layer-${Date.now()}-${i}`, type: 'drawing', elements: [] } as Layer]
-            });
-          }
-          addDocument(newDoc);
-        } else {
-          // Open .xopp
-          const fileData = await readFile(selected);
-          const parsedDoc = parseXopp(fileData, selected);
-          addDocument(parsedDoc);
-        }
-      }
-    } catch (e) {
-      console.error("Failed to open file", e);
-    }
-  };
-
-  const handleSave = async () => {
-    try {
-      let selected = await save({
-        filters: [{ name: 'Xournal++', extensions: ['xopp'] }]
-      });
-      if (typeof selected === 'string') {
-        if (!selected.endsWith('.xopp')) {
-          selected += '.xopp';
-        }
-        const data = serializeXopp(document);
-        await writeFile(selected, data);
-        
-        // Update document metadata in store
-        const fullFileName = selected.split(/[/\\]/).pop() || '';
-        const lastDotIndex = fullFileName.lastIndexOf('.');
-        const newTitle = lastDotIndex !== -1 ? fullFileName.substring(0, lastDotIndex) : fullFileName;
-        
-        useDocumentStore.getState().updateDocumentMetadata(activeDocumentIndex, { 
-          filePath: selected,
-          title: newTitle
-        });
-      }
-    } catch (e) {
-      console.error("Failed to save file", e);
-    }
-  };
 
   const toggleBackground = () => {
     const activePage = document?.pages[activePageIndex];
@@ -114,27 +69,91 @@ export const Toolbar: React.FC = () => {
     }
   };
 
-  const handlePdfInsert = async () => {
+  const openImagePicker = async () => {
     try {
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      const { readFile } = await import('@tauri-apps/plugin-fs');
       const selected = await open({
         multiple: false,
-        filters: [{ name: 'PDF', extensions: ['pdf'] }]
+        filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
       });
-      if (typeof selected === 'string') {
-        const fileData = await readFile(selected);
-        const pdf = await loadPdf(fileData.buffer as ArrayBuffer);
-        useDocumentStore.getState().addPdfPages(selected, pdf.numPages);
-      }
+      if (typeof selected !== 'string') return;
+      const ext = selected.split('.').pop()?.toLowerCase() || 'png';
+      const mimeMap: Record<string, string> = { jpg: 'jpeg', jpeg: 'jpeg', png: 'png', webp: 'webp' };
+      const mime = mimeMap[ext] || 'png';
+      const fileData = await readFile(selected);
+      const base64 = btoa(String.fromCharCode(...new Uint8Array(fileData)));
+      const dataUrl = `data:image/${mime};base64,${base64}`;
+      const img = new Image();
+      img.onload = () => {
+        setPendingInsertImage({ dataUrl, width: img.width, height: img.height });
+        setTool('selection');
+      };
+      img.src = dataUrl;
     } catch (e) {
-      console.error("Failed to open pdf", e);
+      console.error('Bild öffnen fehlgeschlagen', e);
     }
   };
 
   return (
     <div className="toolbar-container">
       <div className="tool-group">
-        <button className="tool-btn" onClick={handleOpen} title="Öffnen"><FolderOpen size={20} /></button>
-        <button className="tool-btn" onClick={handleSave} title="Speichern"><Save size={20} /></button>
+        <button className={`tool-btn ${activeTool === 'pen' ? 'active' : ''}`} onClick={() => setTool('pen')} title="Stift"><Pen size={20} /></button>
+        <button className={`tool-btn ${activeTool === 'eraser' ? 'active' : ''}`} onClick={() => setTool('eraser')} title="Radierer"><Eraser size={20} /></button>
+        <button className={`tool-btn ${activeTool === 'highlighter' ? 'active' : ''}`} onClick={() => setTool('highlighter')} title="Textmarker"><Highlighter size={20} /></button>
+        <button className={`tool-btn ${activeTool === 'shape' ? 'active' : ''}`} onClick={() => setTool('shape')} title="Formenerkennung (Rechteck, Linie)"><Shapes size={20} /></button>
+        <button className={`tool-btn ${activeTool === 'selection' ? 'active' : ''}`} onClick={() => setTool('selection')} title="Auswahl Tool"><MousePointer2 size={20} /></button>
+        <button className={`tool-btn ${activeTool === 'image' ? 'active' : ''}`} onClick={openImagePicker} title="Bild einfügen"><ImageIcon size={20} /></button>
+        <button className={`tool-btn ${activeTool === 'screenshot' ? 'active' : ''}`} onClick={() => setTool('screenshot')} title="Bildschirmausschnitt"><Camera size={20} /></button>
+        <button className={`tool-btn ${activeTool === 'laser' ? 'active' : ''}`} onClick={() => setTool('laser')} title="Laserpointer"><Zap size={20} /></button>
+      </div>
+
+      <div className="tool-group separator">
+        <div className="thickness-selector">
+          <button className={`thickness-btn ${activeStrokeWidth <= 1.5 ? 'active' : ''}`} onClick={() => setActiveStrokeWidth(1.41)} title="Klein">S</button>
+          <button className={`thickness-btn ${activeStrokeWidth > 1.5 && activeStrokeWidth <= 3 ? 'active' : ''}`} onClick={() => setActiveStrokeWidth(2.5)} title="Mittel">M</button>
+          <button className={`thickness-btn ${activeStrokeWidth > 3 ? 'active' : ''}`} onClick={() => setActiveStrokeWidth(5)} title="Dick">L</button>
+        </div>
+      </div>
+
+      <div className="tool-group separator">
+        <div className="color-selectors">
+            <div className="color-picker-wrapper" title={isHighlighter ? 'Textmarkerfarbe' : 'Stiftfarbe'}>
+                {isHighlighter ? (
+                  <input
+                    type="color"
+                    value={highlighterColor}
+                    onChange={(e) => setHighlighterColor(e.target.value)}
+                    className="color-picker"
+                  />
+                ) : (
+                  <input
+                    type="color"
+                    value={color.substring(0, 7)}
+                    onChange={(e) => setColor(e.target.value + (color.substring(7) || 'ff'))}
+                    className="color-picker"
+                  />
+                )}
+                <span className="color-label">{isHighlighter ? 'Marker' : 'Stift'}</span>
+            </div>
+            <div className="color-picker-wrapper" title="Füllfarbe">
+                <div className="fill-color-row">
+                  <input
+                    type="color"
+                    value={isTransparent ? lastFillColorRef.current : fillColor.substring(0, 7)}
+                    onChange={(e) => handleFillColorChange(e.target.value)}
+                    className={`color-picker${isTransparent ? ' color-picker--disabled' : ''}`}
+                    disabled={isTransparent}
+                  />
+                  <button
+                    className={`transparent-btn${isTransparent ? ' transparent-btn--active' : ''}`}
+                    onClick={toggleTransparent}
+                    title={isTransparent ? 'Füllung aktivieren' : 'Transparent'}
+                  >⊘</button>
+                </div>
+                <span className="color-label">Füllung</span>
+            </div>
+        </div>
       </div>
 
       <div className="tool-group separator">
@@ -144,71 +163,10 @@ export const Toolbar: React.FC = () => {
         <button className="tool-btn" onClick={addPage} title="Neue Seite"><Plus size={20} /></button>
       </div>
 
-      <div className="tool-group separator">
-        <button
-          className={`tool-btn ${activeTool === 'pen' ? 'active' : ''}`}
-          onClick={() => setTool('pen')}
-          title="Stift"
-        >
-          <Pen size={20} />
-        </button>
-        <button
-          className={`tool-btn ${activeTool === 'highlighter' ? 'active' : ''}`}
-          onClick={() => setTool('highlighter')}
-          title="Textmarker"
-        >
-          <Highlighter size={20} />
-        </button>
-        <button
-          className={`tool-btn ${activeTool === 'eraser' ? 'active' : ''}`}
-          onClick={() => setTool('eraser')}
-          title="Radiergummi"
-        >
-          <Eraser size={20} />
-        </button>
-        <button
-          className={`tool-btn ${activeTool === 'text' ? 'active' : ''}`}
-          onClick={() => setTool('text')}
-          title="Text"
-        >
-          <Type size={20} />
-        </button>
-        <button
-          className={`tool-btn ${activeTool === 'lasso' ? 'active' : ''}`}
-          onClick={() => setTool('lasso')}
-          title="Lasso Auswahl"
-        >
-          <MousePointer2 size={20} />
-        </button>
-      </div>
-
-      <div className="tool-group separator">
-        <input
-          type="color"
-          value={color.substring(0, 7)} // remove alpha for input
-          onChange={(e) => setColor(e.target.value + 'ff')}
-          className="color-picker"
-          title="Farbe"
-        />
-        <select
-          value={strokeWidth}
-          onChange={(e) => setStrokeWidth(Number(e.target.value))}
-          className="width-picker"
-          title="Strichstärke"
-        >
-          <option value={1}>Fein (1)</option>
-          <option value={1.41}>Standard (1.41)</option>
-          <option value={2}>Mittel (2)</option>
-          <option value={4}>Breit (4)</option>
-        </select>
-      </div>
-
       <div className="tool-group separator right">
-        <button className="tool-btn" onClick={toggleBackground} title="Hintergrund umschalten (Weiß/Kariert)"><Grid3X3 size={20} /></button>
-        <button className="tool-btn" onClick={handlePdfInsert} title="PDF Importieren"><FileText size={20} /></button>
+        <button className="tool-btn" onClick={toggleBackground} title="Hintergrund"><Grid3X3 size={20} /></button>
         <button className="tool-btn" onClick={undo} disabled={past.length === 0} title="Undo"><Undo size={20} /></button>
         <button className="tool-btn" onClick={redo} disabled={future.length === 0} title="Redo"><Redo size={20} /></button>
-        <button className="tool-btn primary" onClick={exportToPdf} title="Als PDF Exportieren"><Download size={20} /></button>
       </div>
     </div>
   );

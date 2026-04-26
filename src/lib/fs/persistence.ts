@@ -1,12 +1,19 @@
-import { writeFile } from '@tauri-apps/plugin-fs';
 import { XoppDocument } from '../../types/xopp';
 import { serializeXopp } from '../xopp/serializer';
 
 export let isInternalSaving = false;
 
 export const saveDocument = async (doc: XoppDocument, path: string) => {
+  // Nur in Tauri ausführen
+  const isTauri = typeof (window as any).__TAURI_INTERNALS__ !== 'undefined' || typeof (window as any).__TAURI__ !== 'undefined';
+  if (!isTauri) {
+    console.warn('saveDocument: Tauri nicht verfügbar, Speichern übersprungen');
+    return false;
+  }
+  
   try {
     isInternalSaving = true;
+    const { writeFile } = await import('@tauri-apps/plugin-fs');
     const data = serializeXopp(doc);
     await writeFile(path, data);
     console.log(`Auto-saved document to ${path}`);

@@ -1,0 +1,14 @@
+TO DO
+Kannst du folgende Fehler noch beheben:
+vorschau links soll beim anklicken auch die Seite in der Mitte rendern
+vorschau links soll auch angezeigt werden
+Wechseln < 1/2 > auf der Toolsleiste soll auch die aktuelle Seitenzahl anzeigen
+Bei mehreren Ebenen soll immer die aktuelle ebene gelöscht werden, auch mehrfachen Ebenenwechseln
+Wird eine Ebene hinzugefügt, soll diese auch automatisch aktiviert werden
+Tool Foto soll ein Rechteck auswählen lassen und davon ein Foto machen und in den Zwischenspeicher legen
+Kontextmenü soll aktuell ausgewählte oder im Speicher befindliche Elemente "Einsert, move, cut, delete" Optionen haben
+Die PDF Export-Funktion funktioniert noch nicht
+Das Lineal von https://github.com/xournalpp/xournalpp.git übernehmen und ein Symbol in der Tool-Leiste einfügen
+Text-Icon mit Leben Füllen  von der xournal.git app abschauen. Eingefügter Text soll ein Kontextmenü haben, welches die Textproperties setztt.
+Seite löschen - als Kontextmenü einer Seite - Symbol rechts neben Vorschau-Fenster.
+Vorschau-Fenster soll aus-/eingeblendet weren können
